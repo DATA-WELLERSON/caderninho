@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Caderninho do Fiado</title>
+  <style>
+    :root { --papel: #fdf6e3; --tinta: #2b2b2b; --linha: #c9d8e8; --vermelho: #c0392b; --verde: #2e7d32; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #3e2c23; color: var(--tinta); }
+    main { max-width: 720px; margin: 24px auto; padding: 24px 16px; background: var(--papel);
+           background-image: repeating-linear-gradient(transparent 0 31px, var(--linha) 31px 32px);
+           border-radius: 6px; box-shadow: 0 8px 24px #0006; }
+    h1 { font-family: "Comic Sans MS", cursive; margin-top: 0; }
+    h2 { font-family: "Comic Sans MS", cursive; border-bottom: 2px solid var(--vermelho); }
+    form { display: grid; grid-template-columns: 2fr 1fr 2fr auto; gap: 8px; }
+    form > * { min-width: 0; width: 100%; }
+    input, button { font: inherit; padding: 8px; border: 1px solid #999; border-radius: 4px; }
+    button { background: var(--tinta); color: #fff; cursor: pointer; }
+    button.pagar { background: var(--verde); padding: 4px 10px; }
+    ul { list-style: none; padding: 0; }
+    li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; }
+    .valor { font-weight: bold; color: var(--vermelho); }
+    .erro { color: var(--vermelho); min-height: 1.5em; }
+    @media (max-width: 560px) { form { grid-template-columns: 1fr 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>📒 Caderninho do Fiado</h1>
+
+  <form id="novo">
+    <input name="cliente" placeholder="Quem?" required maxlength="60">
+    <input name="valor" placeholder="R$" required type="number" step="0.01" min="0.01">
+    <input name="descricao" placeholder="O quê? (2 brahmas...)" maxlength="140">
+    <button>Anotar</button>
+  </form>
+  <p class="erro" id="erro"></p>
+
+  <h2>Devendo</h2>
+  <ul id="pendentes"></ul>
+
+  <h2>🏆 Mural da vergonha</h2>
+  <ol id="ranking"></ol>
+</main>
+
+<script>
+  const brl = (v) => Number(v).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const erro = document.getElementById("erro");
+
+  async function api(caminho, opcoes) {
+    const resp = await fetch(caminho, opcoes);
+    if (!resp.ok) {
+      const corpo = await resp.json().catch(() => ({}));
+      throw new Error(typeof corpo.detail === "string" ? corpo.detail : "Deu ruim (" + resp.status + ")");
+    }
+    return resp.json();
+  }
+
+  function item(texto, valor) {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.textContent = texto;
+    const strong = document.createElement("span");
+    strong.className = "valor";
+    strong.textContent = brl(valor);
+    li.append(span, strong);
+    return li;
+  }
+
+  async function carregar() {
+    try {
+      const [pendentes, ranking] = await Promise.all([
+        api("/api/fiados?pendentes=true"),
+        api("/api/ranking"),
+      ]);
+      const ul = document.getElementById("pendentes");
+      ul.replaceChildren(...pendentes.map((f) => {
+        const li = item(f.cliente + (f.descricao ? " — " + f.descricao : ""), f.valor);
+        const botao = document.createElement("button");
+        botao.className = "pagar";
+        botao.textContent = "Pagou";
+        botao.onclick = () => pagar(f.id);
+        li.append(botao);
+        return li;
+      }));
+      if (!pendentes.length) ul.textContent = "Ninguém devendo. Estranho.";
+      document.getElementById("ranking").replaceChildren(
+        ...ranking.map((d) => item(d.cliente + " (" + d.quantidade + "x)", d.total))
+      );
+    } catch (e) {
+      erro.textContent = e.message;
+    }
+  }
+
+  async function pagar(id) {
+    try {
+      await api("/api/fiados/" + id + "/pagar", { method: "POST" });
+      await carregar();
+    } catch (e) {
+      erro.textContent = e.message;
+    }
+  }
+
+  document.getElementById("novo").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    erro.textContent = "";
+    const dados = Object.fromEntries(new FormData(ev.target));
+    try {
+      await api("/api/fiados", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(dados),
+      });
+      ev.target.reset();
+      await carregar();
+    } catch (e) {
+      erro.textContent = e.message;
+    }
+  });
+
+  carregar();
+</script>
+</body>
+</html>

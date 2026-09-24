@@ -1,0 +1,121 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  qualidade:
+    name: Lint e formatação
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - name: requirements.txt (usado pela Vercel) em sincronia com uv.lock
+        run: |
+          uv export --no-dev --no-hashes --no-header --no-emit-project \
+            --format requirements-txt -o /tmp/requirements.txt
+          diff requirements.txt /tmp/requirements.txt
+
+  testes:
+    name: Testes (com Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: caderninho
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/caderninho
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest --cov-report=xml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+  preview:
+    name: Deploy de preview
+    # PRs de forks não têm acesso aos secrets.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: [qualidade, testes]
+    runs-on: ubuntu-latest
+    environment: preview
+    steps:
+      - uses: actions/checkout@v5
+      - run: npx vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+      - run: npx vercel build --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy
+        run: |
+          url=$(npx vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }} \
+            --env SENTRY_RELEASE=${{ github.sha }})
+          echo "Preview: $url" >> "$GITHUB_STEP_SUMMARY"
+
+  producao:
+    name: Migração + deploy de produção
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [qualidade, testes]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    env:
+      SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --no-dev
+
+      - name: Migrações no Supabase
+        run: uv run python -m app.migrate
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - run: npx vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - run: npx vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - run: |
+          npx vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }} \
+            --env SENTRY_RELEASE=${{ github.sha }}
+
+      - name: Smoke test
+        run: |
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors \
+            "${{ vars.PRODUCTION_URL }}/api/health"
+
+      - name: Release no Sentry
+        if: env.SENTRY_AUTH_TOKEN != ''
+        uses: getsentry/action-release@v3
+        env:
+          SENTRY_ORG: ${{ vars.SENTRY_ORG }}
+          SENTRY_PROJECT: ${{ vars.SENTRY_PROJECT }}
+        with:
+          environment: production
+          release: ${{ github.sha }}

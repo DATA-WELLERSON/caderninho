@@ -1,0 +1,50 @@
+annotated-doc==0.0.5
+    # via fastapi
+annotated-types==0.8.0
+    # via pydantic
+anyio==4.15.1
+    # via starlette
+certifi==2026.7.22
+    # via sentry-sdk
+fastapi==0.141.1
+    # via
+    #   caderninho
+    #   sentry-sdk
+idna==3.20
+    # via anyio
+psycopg==3.3.6
+    # via caderninho
+psycopg-binary==3.3.6 ; implementation_name != 'pypy'
+    # via psycopg
+pydantic==2.13.5
+    # via
+    #   fastapi
+    #   pydantic-settings
+pydantic-core==2.46.5
+    # via pydantic
+pydantic-settings==2.15.0
+    # via caderninho
+python-dotenv==1.2.3
+    # via pydantic-settings
+sentry-sdk==2.70.0
+    # via caderninho
+starlette==1.7.0
+    # via fastapi
+typing-extensions==4.16.0
+    # via
+    #   anyio
+    #   fastapi
+    #   psycopg
+    #   pydantic
+    #   pydantic-core
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.4
+    # via
+    #   fastapi
+    #   pydantic
+    #   pydantic-settings
+tzdata==2026.4 ; sys_platform == 'win32'
+    # via psycopg
+urllib3==2.8.0
+    # via sentry-sdk

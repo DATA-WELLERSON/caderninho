@@ -1,0 +1,5 @@
+.venv
+.env
+tests
+.github
+docker-compose.yml
